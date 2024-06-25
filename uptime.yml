@@ -1,0 +1,50 @@
+---
+- name: Verificar uptime em múltiplos sistemas operacionais
+  hosts: all
+  gather_facts: yes
+
+  tasks:
+    - name: Obter uptime em sistemas Unix/Linux
+      shell: |
+        {% if ansible_system == 'Linux' %}
+        cat /proc/uptime | awk '{print $1}'
+        {% elif ansible_system == 'FreeBSD' or ansible_system == 'Darwin' %}
+        sysctl -n kern.boottime | awk '{print time() - $4}'
+        {% else %}
+        uptime | awk '{print $3}' | tr -d ','
+        {% endif %}
+      register: unix_uptime
+      changed_when: false
+      when: ansible_os_family != "Windows"
+
+    - name: Obter uptime em sistemas Windows
+      win_command: powershell.exe "Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime"
+      register: win_uptime
+      changed_when: false
+      when: ansible_os_family == "Windows"
+
+    - name: Calcular uptime legível para sistemas Unix/Linux
+      set_fact:
+        readable_uptime: >-
+          {% set seconds = unix_uptime.stdout | float %}
+          {% set days = (seconds / 86400) | int %}
+          {% set hours = ((seconds % 86400) / 3600) | int %}
+          {% set minutes = ((seconds % 3600) / 60) | int %}
+          {{ days }} dias, {{ hours }} horas, {{ minutes }} minutos
+      when: ansible_os_family != "Windows"
+
+    - name: Calcular uptime legível para sistemas Windows
+      set_fact:
+        readable_uptime: >-
+          {% set boot_time = win_uptime.stdout | to_datetime %}
+          {% set current_time = ansible_date_time.iso8601 | to_datetime %}
+          {% set uptime = (current_time - boot_time).total_seconds() %}
+          {% set days = (uptime / 86400) | int %}
+          {% set hours = ((uptime % 86400) / 3600) | int %}
+          {% set minutes = ((uptime % 3600) / 60) | int %}
+          {{ days }} dias, {{ hours }} horas, {{ minutes }} minutos
+      when: ansible_os_family == "Windows"
+
+    - name: Exibir uptime
+      debug:
+        msg: "O uptime do sistema {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }}) é: {{ readable_uptime }}"
